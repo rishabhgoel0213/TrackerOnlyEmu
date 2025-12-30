@@ -63,7 +63,7 @@
             source $VENV/bin/activate
 
             # allow for the environment to pick up packages installed with virtualenv
-            export PYTHONPATH=$VENV/${python.sitePackages}/:$PYTHONPATH
+            export PYTHONPATH="$PWD:$VENV/${python.sitePackages}/:$PYTHONPATH"
           '';
         };
       });

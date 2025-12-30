@@ -19,3 +19,7 @@ studies/**/*.pickle
 
 *.pyc
 *.root
+
+scripts/bootstrap_l0hadron/*
+!scripts/bootstrap_l0hadron/*.*
+scripts/bootstrap_l0hadron/test.cpp

@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <random>
 #include <system_error>
+#include <iostream>
+#include <numeric>
 
 namespace fs = std::experimental::filesystem;
 
@@ -57,24 +59,26 @@ ReducedTreeHandle getReducedTree(const std::string& fileName)
 int main(int argc, char** argv)
 {
     std::mt19937 rng(12345);
+    std::string subsetDir = "subsets";
 
     std::error_code ec;
-    fs::create_directories(fs::path("subsets"), ec);
+    fs::create_directories(subsetDir, ec);
     if(ec) return 1;
 
     //Inputs
     const std::string inputPath = (argc > 1) ? argv[1] : "/home/rishabh/lhcb-ntuples-gen/ntuples/0.9.4-trigger_emulation/Dst_D0-mc/Dst_D0--21_04_21--mc--MC_2016_Beam6500GeV-2016-MagDown-Nu1.6-25ns-Pythia8_Sim09j_Trig0x6139160F_Reco16_Turbo03a_Filtered_11574021_D0TAUNU.SAFESTRIPTRIG.DST.root";
 
     //Hyperparameters
-    constexpr int numSubsets = 2;
+    constexpr int numSubsets = 50;
     constexpr double trainFrac = 0.5;
+    constexpr bool resample = true;
 
     auto reduced = ::getReducedTree(inputPath);
     if(!reduced.tree) return 1;
     TTree* reducedTree = reduced.tree;
 
     long numEntries = reducedTree->GetEntries();
-    long subsetSize = (numEntries + numSubsets - 1) / numSubsets;
+    long subsetSize = resample ? numEntries : (numEntries + numSubsets - 1) / numSubsets;
 
     std::vector<std::unique_ptr<TFile>> trainFiles;
     std::vector<std::unique_ptr<TFile>> testFiles;
@@ -86,34 +90,48 @@ int main(int argc, char** argv)
     trainSubsets.reserve(numSubsets);
     testSubsets.reserve(numSubsets);
 
-    std::vector<std::vector<long>> trainIndexes;
-    trainIndexes.resize(numSubsets);
+    std::vector<long> shuffledIndexes(numEntries);
+    std::vector<std::vector<long>> indexes(numSubsets);
+
+    std::iota(shuffledIndexes.begin(), shuffledIndexes.end(), 0);
+
+    std::shuffle(shuffledIndexes.begin(), shuffledIndexes.end(), rng);
+    std::uniform_int_distribution<long> dist(1, subsetSize - 1);
     for(int k = 0; k < numSubsets; k++)
     {
-        trainIndexes[k].reserve(subsetSize);
+        if(resample)
+        {
+            for(int i = 0; i < subsetSize; i++)
+            {
+                indexes[k].push_back(dist(rng));
+            }
+        }
+        else
+        {
+            const long start = subsetSize * k;
+            if(start >= numEntries)
+            {
+                indexes[k].clear();
+                continue;
+            }
+            const long end = std::min(numEntries, start + subsetSize);
+            indexes[k] = std::vector<long>(shuffledIndexes.begin() + start, shuffledIndexes.begin() + end);
+        }
+        std::sort(indexes[k].begin(), indexes[k].end()); //For performance; reading from a TTree is slow out of order
     }
-    for(long i = 0; i < numEntries; i++)
-    {
-        long k = i % numSubsets;
-        trainIndexes[k].push_back(i);
-    }
-    for(int k = 0; k < numSubsets; k++)
-    {
-        std::shuffle(trainIndexes[k].begin(), trainIndexes[k].end(), rng);
-        long numTrain = long(trainIndexes[k].size() * trainFrac);
-        trainIndexes[k] = std::vector<long>(trainIndexes[k].begin(), trainIndexes[k].begin() + numTrain);
-    }
+
+    std::cout << "Generated subsets. Now creating trees" << std::endl;
 	
     for(int i = 0; i < numSubsets; i++)
     {
-        const auto trainPath = (fs::path("subsets") / ("train_subset_" + std::to_string(i + 1) + ".root")).string();
+        const auto trainPath = (fs::path(subsetDir) / ("train_subset_" + std::to_string(i + 1) + ".root")).string();
         trainFiles.emplace_back(TFile::Open(trainPath.c_str(), "RECREATE"));
         trainFiles.back()->cd();
         TTree* out = reducedTree->CloneTree(0);
         out->SetName("DecayTree");
         trainSubsets.push_back(out);
 
-        const auto testPath = (fs::path("subsets") / ("test_subset_" + std::to_string(i + 1) + ".root")).string();
+        const auto testPath = (fs::path(subsetDir) / ("test_subset_" + std::to_string(i + 1) + ".root")).string();
         testFiles.emplace_back(TFile::Open(testPath.c_str(), "RECREATE"));
         testFiles.back()->cd();
         out = reducedTree->CloneTree(0);
@@ -121,19 +139,18 @@ int main(int argc, char** argv)
         testSubsets.push_back(out);
     }
 
-    for(long i = 0; i < numEntries; i++)
+    for(int i = 0; i < numSubsets; i++)
     {
-        reducedTree->GetEntry(i);
-        long k = i % numSubsets;
-        if(std::find(trainIndexes[k].begin(), trainIndexes[k].end(), i) != trainIndexes[k].end())
+        for(long j = 0; j < indexes[i].size(); j++)
         {
-            trainSubsets[k]->Fill();
+            reducedTree->GetEntry(indexes[i][j]);
+            if(j < indexes[i].size() * trainFrac) trainSubsets[i]->Fill();
+            else testSubsets[i]->Fill();
         }
-        else
-        {
-            testSubsets[k]->Fill();
-        }
+        std::cout << "Tree #" << (i + 1) << " finished" << std::endl;
     }
+
+    std::cout << "All trees finished. Now writing to memory" << std::endl;
 
     for(int i = 0; i < numSubsets; i++)
     {
@@ -150,5 +167,7 @@ int main(int argc, char** argv)
             testFiles[i]->Close();
         }
     }
+
+    std::cout << "All trees created and written to memory" << std::endl;
     return 0;
 }

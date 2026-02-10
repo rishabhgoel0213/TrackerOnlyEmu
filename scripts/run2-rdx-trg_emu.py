@@ -48,6 +48,8 @@ specify tree name.
 
     parser.add_argument('-c', '--adhoc_tis_correction', action='store_true', help='specify if ad-hoc L0 Global TIS correction at high B pT should be used')
 
+    parser.add_argument('-n', '--ntracks', action='store_true', help='specify if L0 Global TIS eff should consider nTracks for val (3D=[log(pz),log(pt),nTracks])')
+
     parser.add_argument('-B', '--Bmeson', default='b0', help='''
 specify the name of the B meson in the tree.''')
 
@@ -68,10 +70,11 @@ enable debug mode.
 if __name__ == '__main__':
     args = parse_input()
 
-    if args.adhoc_tis_correction: print(f'Note: using ad-hoc correction for L0 Global TIS measurement at high B log(pT)')
+    if args.adhoc_tis_correction: print('Note: using ad-hoc correction for L0 Global TIS measurement at high B log(pT)')
+    if args.ntracks: print('Note: Using 3D eff histo in [log(pz),log(pt),nTracks] for L0 Global TIS eff')
 
     # L0Global TIS
-    directives = run2_rdx_l0_global_tis_directive_gen(args.Bmeson, args.year, args.adhoc_tis_correction)
+    directives = run2_rdx_l0_global_tis_directive_gen(args.Bmeson, args.year, args.adhoc_tis_correction, args.ntracks)
     # HLT 1
     directives += run2_rdx_hlt1_directive_gen(args.Bmeson, args.year)
 

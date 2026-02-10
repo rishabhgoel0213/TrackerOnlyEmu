@@ -50,11 +50,11 @@ XGB_TRAIN_BRANCHES = [
 #################
 # Main #########################################################################
 
-def run2_rdx_l0_global_tis_directive_gen(Bmeson, year, adhoc_tis_correction=True):
+def run2_rdx_l0_global_tis_directive_gen(Bmeson, year, adhoc_tis_correction=True, ntracks=False):
     load_cpp('<triggers/l0/run2-L0GlobalTIS.h>')
 
-    gInterpreter.Declare('auto histoResp = new TFile("{}");'.format(
-        load_file('<triggers/l0/l0_tis_efficiency.root>')))
+    if not ntracks: gInterpreter.Declare('auto histoResp = new TFile("{}");'.format(load_file('<triggers/l0/l0_tis_efficiency.root>')))
+    else: gInterpreter.Declare('auto histoResp = new TFile("{}");'.format(load_file('<triggers/l0/l0_tis_efficiency3D.root>')))
 
     epilogue = '''
     auto hResp = readL0GlobalTisResp(histoResp);
@@ -62,16 +62,16 @@ def run2_rdx_l0_global_tis_directive_gen(Bmeson, year, adhoc_tis_correction=True
     gInterpreter.Declare(epilogue)
 
     # NOTE: For RDX, we use TRUE B momentum due to missing neutrinos
-    return [
-        EXEC('Define', '{}_pz'.format(Bmeson),
-             '{}_TRUEP_Z'.format(Bmeson), True),
-        EXEC('Define', '{}_pt'.format(Bmeson),
-             '{}_TRUEPT'.format(Bmeson), True),
-        EXEC('Define', '{}_l0_global_tis_emu'.format(Bmeson),
-             'l0GlobalTisTriggerEmu({}, {}, {}, hResp, {})'.format(
-                 '{}_pz'.format(Bmeson),
-                 '{}_pt'.format(Bmeson),
-                 year, str(adhoc_tis_correction).lower()), True),
+    if not ntracks: return [
+        EXEC('Define', '{}_pz'.format(Bmeson), '{}_TRUEP_Z'.format(Bmeson), True),
+        EXEC('Define', '{}_pt'.format(Bmeson), '{}_TRUEPT'.format(Bmeson), True),
+        EXEC('Define', '{}_l0_global_tis_emu'.format(Bmeson), 'l0GlobalTisTriggerEmu({}, {}, {}, hResp, {})'.format('{}_pz'.format(Bmeson), '{}_pt'.format(Bmeson), year, str(adhoc_tis_correction).lower()), True),
+    ]
+    else: return [
+        EXEC('Define', '{}_pz'.format(Bmeson), '{}_TRUEP_Z'.format(Bmeson), True),
+        EXEC('Define', '{}_pt'.format(Bmeson), '{}_TRUEPT'.format(Bmeson), True),
+        EXEC('Define', 'ntracks', 'nTracks', True),
+        EXEC('Define', '{}_l0_global_tis_emu'.format(Bmeson), 'l0GlobalTisTrigger3DEmu({}, {}, {}, {}, hResp, {})'.format('{}_pz'.format(Bmeson), '{}_pt'.format(Bmeson), 'ntracks', year, str(adhoc_tis_correction).lower()), True),
     ]
 
 

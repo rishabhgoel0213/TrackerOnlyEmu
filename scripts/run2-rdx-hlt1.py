@@ -84,8 +84,8 @@ if __name__ == '__main__':
         EXEC('Define', 'pi_p', 'pi_P / 1e3', True),
         EXEC('Define', 'mu_pt', 'mu_PT / 1e3', True),
         EXEC('Define', 'mu_p', 'mu_P / 1e3', True),
-        EXEC('Define', 'k_pi_apt', 'computePt(k_PX+pi_PX, k_PY+pi_PY) / 1e3',
-             True),
+        EXEC('Define', 'k_pi_pt', 'computePt(k_PX+pi_PX, k_PY+pi_PY) / 1e3', True),
+        EXEC('Define', 'd0_pt', 'd0_PT / 1e3', True),
 
         # Track quality variables
         EXEC('Define', 'k_chi2ndof', 'k_TRACK_CHI2NDOF', True),

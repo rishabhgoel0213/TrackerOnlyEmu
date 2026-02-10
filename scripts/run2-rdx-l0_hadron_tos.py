@@ -69,6 +69,7 @@ REGRESSOR_CONFIG['xgb'] = {
         'pi_p',
         'd0_p',
         'nspdhits',
+        'q2', 'mmiss2', 'el'
     ],
     'reg_br': 'd0_L0HadronDecision_TOS',
     'prep': lambda: 0,

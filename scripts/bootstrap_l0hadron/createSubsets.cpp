@@ -1,7 +1,7 @@
 #include "TFile.h"
 #include "TTree.h"
-#include "TDirectory.h"
-#include "TMemFile.h"
+#include "TChain.h"
+#include "TError.h"
 #include <experimental/filesystem>
 #include <memory>
 #include <string>
@@ -11,23 +11,66 @@
 #include <system_error>
 #include <iostream>
 #include <numeric>
+#include <cstring>
 
 namespace fs = std::experimental::filesystem;
 
 namespace
 {
+
+//Supressing some useless errors 
+void filteredRootErrorHandler(int level, Bool_t abort, const char* location, const char* msg)
+{
+    if(location && msg &&
+       (std::strcmp(location, "TList::Clear") == 0 || std::strcmp(location, "TList::Delete") == 0) &&
+       std::strstr(msg, "already deleted") != nullptr)
+    {
+        return;
+    }
+    DefaultErrorHandler(level, abort, location, msg);
+}
+
 struct ReducedTreeHandle 
 {
-    std::unique_ptr<TMemFile> memFile;
+    std::unique_ptr<TChain> chain;
     TTree* tree = nullptr;
 };
 
-ReducedTreeHandle getReducedTree(const std::string& fileName)
+std::vector<std::string> collectInputFiles(const std::string& inputPath)
+{
+    std::vector<std::string> fileNames;
+    std::error_code ec;
+    fs::path path(inputPath);
+    if(fs::is_directory(path, ec))
+    {
+        fs::directory_iterator it(path, ec);
+        fs::directory_iterator end;
+        for(; it != end && !ec; it.increment(ec))
+        {
+            std::error_code fileEc;
+            if(!fs::is_regular_file(it->path(), fileEc) || fileEc) continue;
+            if(it->path().extension() != ".root") continue;
+            const std::string fileName = it->path().filename().string();
+            if(fileName.find("aux") != std::string::npos) continue;
+            fileNames.push_back(it->path().string());
+        }
+        std::sort(fileNames.begin(), fileNames.end());
+    }
+    else if(!ec)
+    {
+        fileNames.push_back(inputPath);
+    }
+    return fileNames;
+}
+
+ReducedTreeHandle getReducedTree(const std::string& inputPath)
 {
     ReducedTreeHandle out;
-    std::shared_ptr<TFile> file(TFile::Open(fileName.c_str(), "READ"));
-    TDirectoryFile* dir = (TDirectoryFile*)file->Get("TupleB0");
-    auto tree = dir->Get<TTree>("DecayTree");
+    auto inputFiles = collectInputFiles(inputPath);
+
+    out.chain = std::make_unique<TChain>("TupleB0/DecayTree");
+    for(const auto& fileName : inputFiles) out.chain->Add(fileName.c_str());
+    if(out.chain->GetEntries() == 0) return out;
 
     //Keep all branches that exist in the sample tree
     std::shared_ptr<TFile> branchesFile(TFile::Open("../../samples/run2-rdx-train_xgb.root", "READ"));
@@ -35,29 +78,29 @@ ReducedTreeHandle getReducedTree(const std::string& fileName)
     auto branchesTree = branchesDir->Get<TTree>("DecayTree");
     TObjArray* branches = branchesTree->GetListOfBranches();
 
-    tree->SetBranchStatus("*", 0);
+    out.chain->SetBranchStatus("*", 0);
     for(int i = 0; i < branches->GetEntries(); i++)
     {
         auto* branch = static_cast<TBranch*>(branches->At(i));
         const char* name = branch->GetName();
-        if(tree->GetBranch(name)) tree->SetBranchStatus(name, 1);
+        if(out.chain->GetBranch(name)) out.chain->SetBranchStatus(name, 1);
     }
 
     //Additional necessary branches
-    if(tree->GetBranch("FitVar_q2")) tree->SetBranchStatus("FitVar_q2", 1);
-    if(tree->GetBranch("FitVar_Mmiss2")) tree->SetBranchStatus("FitVar_Mmiss2", 1);
-    if(tree->GetBranch("FitVar_El")) tree->SetBranchStatus("FitVar_El", 1);
+    if(out.chain->GetBranch("FitVar_q2")) out.chain->SetBranchStatus("FitVar_q2", 1);
+    if(out.chain->GetBranch("FitVar_Mmiss2")) out.chain->SetBranchStatus("FitVar_Mmiss2", 1);
+    if(out.chain->GetBranch("FitVar_El")) out.chain->SetBranchStatus("FitVar_El", 1);
 
 
-    out.memFile = std::make_unique<TMemFile>("reducedTree.root", "RECREATE");
-    TDirectory::TContext inMemory(out.memFile.get());
-    out.tree = tree->CloneTree(-1, "fast");
+    out.tree = out.chain.get();
     return out;
 }
 } //namespace
 
 int main(int argc, char** argv)
 {
+    SetErrorHandler(filteredRootErrorHandler);
+
     std::mt19937 rng(12345);
     std::string subsetDir = "subsets";
 
@@ -66,7 +109,7 @@ int main(int argc, char** argv)
     if(ec) return 1;
 
     //Inputs
-    const std::string inputPath = (argc > 1) ? argv[1] : "/home/rishabh/lhcb-ntuples-gen/ntuples/0.9.4-trigger_emulation/Dst_D0-mc/Dst_D0--21_04_21--mc--MC_2016_Beam6500GeV-2016-MagDown-Nu1.6-25ns-Pythia8_Sim09j_Trig0x6139160F_Reco16_Turbo03a_Filtered_11574021_D0TAUNU.SAFESTRIPTRIG.DST.root";
+    const std::string inputPath = (argc > 1) ? argv[1] : "/home/rishabh/lhcb-ntuples-gen/ntuples/0.9.13-JpsiK_and_Dstlnu_fullsim_for_L0emu_initrwgt/Dstlnu-mc/2017/norm_DstMu/DstMu-11574021-MagDown";
 
     //Hyperparameters
     constexpr int numSubsets = 100;
@@ -158,15 +201,17 @@ int main(int argc, char** argv)
         {
             trainFiles[i]->cd();
             trainSubsets[i]->Write();
-            trainFiles[i]->Close();
+            reducedTree->CopyAddresses(trainSubsets[i], true);
         }
         if(testFiles[i] && testSubsets[i])
         {
             testFiles[i]->cd();
             testSubsets[i]->Write();
-            testFiles[i]->Close();
+            reducedTree->CopyAddresses(testSubsets[i], true);
         }
     }
+
+    if(auto* clones = reducedTree->GetListOfClones()) clones->Clear("nodelete");
 
     std::cout << "All trees created and written to memory" << std::endl;
     return 0;

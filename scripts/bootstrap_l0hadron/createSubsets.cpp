@@ -63,7 +63,7 @@ std::vector<std::string> collectInputFiles(const std::string& inputPath)
     return fileNames;
 }
 
-ReducedTreeHandle getReducedTree(const std::string& inputPath)
+ReducedTreeHandle getReducedTree(const std::string& inputPath, const std::string& branchesPath)
 {
     ReducedTreeHandle out;
     auto inputFiles = collectInputFiles(inputPath);
@@ -73,7 +73,7 @@ ReducedTreeHandle getReducedTree(const std::string& inputPath)
     if(out.chain->GetEntries() == 0) return out;
 
     //Keep all branches that exist in the sample tree
-    std::shared_ptr<TFile> branchesFile(TFile::Open("../../samples/run2-rdx-train_xgb.root", "READ"));
+    std::shared_ptr<TFile> branchesFile(TFile::Open(branchesPath.c_str(), "READ"));
     TDirectoryFile* branchesDir = (TDirectoryFile*)branchesFile->Get("TupleB0");
     auto branchesTree = branchesDir->Get<TTree>("DecayTree");
     TObjArray* branches = branchesTree->GetListOfBranches();
@@ -102,21 +102,24 @@ int main(int argc, char** argv)
     SetErrorHandler(filteredRootErrorHandler);
 
     std::mt19937 rng(12345);
-    std::string subsetDir = "subsets";
+    const fs::path scriptDir = fs::absolute(fs::path(argv[0])).parent_path();
+    const fs::path repoRoot = scriptDir / ".." / "..";
+    const std::string subsetDir = (scriptDir / "subsets").string();
+    const std::string branchesPath = (repoRoot / "samples" / "run2-rdx-train_xgb.root").string();
 
     std::error_code ec;
     fs::create_directories(subsetDir, ec);
     if(ec) return 1;
 
     //Inputs
-    const std::string inputPath = (argc > 1) ? argv[1] : "/home/rishabh/lhcb-ntuples-gen/ntuples/0.9.13-JpsiK_and_Dstlnu_fullsim_for_L0emu_initrwgt/Dstlnu-mc/2017/norm_DstMu/DstMu-11574021-MagDown";
+    const std::string inputPath = (argc > 1) ? argv[1] : (repoRoot / "samples" / "run2-rdx-sample.root").string();
 
     //Hyperparameters
     constexpr int numSubsets = 100;
     constexpr double trainFrac = 0.5;
     constexpr bool resample = true;
 
-    auto reduced = ::getReducedTree(inputPath);
+    auto reduced = ::getReducedTree(inputPath, branchesPath);
     if(!reduced.tree) return 1;
     TTree* reducedTree = reduced.tree;
 

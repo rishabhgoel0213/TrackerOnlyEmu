@@ -167,10 +167,12 @@ void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
 }
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
-    const std::string genDir = "../../gen";
-    const std::string plotDir = "plots";
+    const fs::path scriptDir = fs::absolute(fs::path(argv[0])).parent_path();
+    const fs::path repoRoot = scriptDir / ".." / "..";
+    const std::string genDir = (repoRoot / "gen").string();
+    const std::string plotDir = (scriptDir / "plots").string();
 
     //Histogram Parameters
     constexpr int numBins = 20;

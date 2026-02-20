@@ -173,6 +173,8 @@ int main(int argc, char** argv)
     const fs::path repoRoot = scriptDir / ".." / "..";
     const std::string genDir = (repoRoot / "gen").string();
     const std::string plotDir = (scriptDir / "plots").string();
+    const std::string outputPlotName = (argc > 1) ? argv[1] : "efficiency_plot_combined.png";
+    const fs::path outputPlotPath = fs::path(plotDir) / outputPlotName;
 
     //Histogram Parameters
     constexpr int numBins = 20;
@@ -284,7 +286,7 @@ int main(int argc, char** argv)
     leg.AddEntry(grEmu, "Emulated", "lep");
     leg.Draw();
 
-    c.SaveAs((plotDir + "/efficiency_plot_combined.png").c_str());
+    c.SaveAs(outputPlotPath.string().c_str());
 
     return 0;
 }

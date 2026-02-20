@@ -17,7 +17,7 @@ GENERATE_PLOTS_BIN="${BOOTSTRAP_DIR}/generatePlots"
 
 TRAIN_SCRIPT="${BOOTSTRAP_DIR}/train_all.sh"
 TEST_SCRIPT="${BOOTSTRAP_DIR}/test_all.sh"
-FINAL_PLOT="${PLOTS_DIR}/efficiency_plot_combined.png"
+DEFAULT_FINAL_PLOT_NAME="efficiency_plot_combined.png"
 
 build_root_cpp() {
   local src="$1"
@@ -50,20 +50,29 @@ cleanup_intermediate() {
 }
 
 main() {
+  local input_path="${1:-}"
+  local final_plot_name="${2:-${DEFAULT_FINAL_PLOT_NAME}}"
+  local default_final_plot="${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}"
+  local final_plot="${PLOTS_DIR}/${final_plot_name}"
+
   cd -- "${REPO_ROOT}"
   mkdir -p -- "${GEN_DIR}" "${SUBSETS_DIR}" "${PLOTS_DIR}"
 
   cleanup_intermediate
-  rm -f -- "${GEN_DIR}"/test_subset_*_output.root "${FINAL_PLOT}"
+  rm -f -- "${GEN_DIR}"/test_subset_*_output.root "${default_final_plot}" "${final_plot}"
 
   build_root_cpp "${CREATE_SUBSETS_SRC}" "${CREATE_SUBSETS_BIN}"
-  "${CREATE_SUBSETS_BIN}" "$@"
+  if [[ -n "${input_path}" ]]; then
+    "${CREATE_SUBSETS_BIN}" "${input_path}"
+  else
+    "${CREATE_SUBSETS_BIN}"
+  fi
 
   run_in_python_root_shell "bash -e \"${TRAIN_SCRIPT}\""
   run_in_python_root_shell "bash -e \"${TEST_SCRIPT}\""
 
   build_root_cpp "${GENERATE_PLOTS_SRC}" "${GENERATE_PLOTS_BIN}"
-  "${GENERATE_PLOTS_BIN}"
+  "${GENERATE_PLOTS_BIN}" "${final_plot_name}"
 
   cleanup_intermediate
 
@@ -72,8 +81,8 @@ main() {
     exit 1
   fi
 
-  if [[ ! -f "${FINAL_PLOT}" ]]; then
-    echo "Final plot was not produced at ${FINAL_PLOT}" >&2
+  if [[ ! -f "${final_plot}" ]]; then
+    echo "Final plot was not produced at ${final_plot}" >&2
     exit 1
   fi
 }

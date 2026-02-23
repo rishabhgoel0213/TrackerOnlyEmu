@@ -49,17 +49,97 @@ cleanup_intermediate() {
   fi
 }
 
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options]
+
+Options:
+  -i, --input PATH           Input ROOT file for subset creation.
+  -p, --plot-name NAME       Base name for output plot files.
+  -b, --branches LIST...     Space-separated branch list (can be repeated).
+  -h, --help                 Show this help message.
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") -i /path/to/input.root -p efficiency_plot_2018.png
+  $(basename "$0") -b d0_pt k_pt -b pi_pt
+EOF
+}
+
 main() {
-  local input_path="${1:-}"
-  local final_plot_name="${2:-${DEFAULT_FINAL_PLOT_NAME}}"
-  local default_final_plot="${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}"
-  local final_plot="${PLOTS_DIR}/${final_plot_name}"
+  local input_path=""
+  local final_plot_name="${DEFAULT_FINAL_PLOT_NAME}"
+  local -a bin_branches=()
+  while (($#)); do
+    case "$1" in
+      -i|--input)
+        if (($# < 2)); then
+          echo "Missing value for $1" >&2
+          usage >&2
+          exit 1
+        fi
+        input_path="$2"
+        shift 2
+        ;;
+      -p|--plot-name)
+        if (($# < 2)); then
+          echo "Missing value for $1" >&2
+          usage >&2
+          exit 1
+        fi
+        final_plot_name="$2"
+        shift 2
+        ;;
+      -b|--branches)
+        if (($# < 2)); then
+          echo "Missing value for $1" >&2
+          usage >&2
+          exit 1
+        fi
+        shift
+        while (($#)) && [[ "$1" != -* ]]; do
+          bin_branches+=("$1")
+          shift
+        done
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --)
+        shift
+        if (($#)); then
+          echo "Unexpected positional arguments: $*" >&2
+          usage >&2
+          exit 1
+        fi
+        break
+        ;;
+      -*)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+      *)
+        echo "Unexpected positional argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if ((${#bin_branches[@]} == 0)); then
+    bin_branches=("d0_pt")
+  fi
 
   cd -- "${REPO_ROOT}"
   mkdir -p -- "${GEN_DIR}" "${SUBSETS_DIR}" "${PLOTS_DIR}"
 
   cleanup_intermediate
-  rm -f -- "${GEN_DIR}"/test_subset_*_output.root "${default_final_plot}" "${final_plot}"
+  rm -f -- "${GEN_DIR}"/test_subset_*_output.root "${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}" "${PLOTS_DIR}/${final_plot_name}"
+  for branch in "${bin_branches[@]}"; do
+    rm -f -- "${PLOTS_DIR}/${branch}_${final_plot_name}"
+  done
 
   build_root_cpp "${CREATE_SUBSETS_SRC}" "${CREATE_SUBSETS_BIN}"
   if [[ -n "${input_path}" ]]; then
@@ -72,7 +152,7 @@ main() {
   run_in_python_root_shell "bash -e \"${TEST_SCRIPT}\""
 
   build_root_cpp "${GENERATE_PLOTS_SRC}" "${GENERATE_PLOTS_BIN}"
-  "${GENERATE_PLOTS_BIN}" "${final_plot_name}"
+  "${GENERATE_PLOTS_BIN}" "${final_plot_name}" "${bin_branches[@]}"
 
   cleanup_intermediate
 
@@ -81,10 +161,12 @@ main() {
     exit 1
   fi
 
-  if [[ ! -f "${final_plot}" ]]; then
-    echo "Final plot was not produced at ${final_plot}" >&2
-    exit 1
-  fi
+  for branch in "${bin_branches[@]}"; do
+    if [[ ! -f "${PLOTS_DIR}/${branch}_${final_plot_name}" ]]; then
+      echo "Final plot was not produced at ${PLOTS_DIR}/${branch}_${final_plot_name}" >&2
+      exit 1
+    fi
+  done
 }
 
 main "$@"

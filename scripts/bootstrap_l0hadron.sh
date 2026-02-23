@@ -18,14 +18,16 @@ GENERATE_PLOTS_BIN="${BOOTSTRAP_DIR}/generatePlots"
 TRAIN_SCRIPT="${BOOTSTRAP_DIR}/train_all.sh"
 TEST_SCRIPT="${BOOTSTRAP_DIR}/test_all.sh"
 DEFAULT_FINAL_PLOT_NAME="efficiency_plot_combined.png"
+DEFAULT_CPP_STD="c++14"
 
 build_root_cpp() {
   local src="$1"
   local out="$2"
+  local cpp_std="${BOOTSTRAP_CPP_STD:-${DEFAULT_CPP_STD}}"
   local compile_cmd
 
-  compile_cmd="g++ -fdiagnostics-color=always -g \$(root-config --cflags) \"${src}\" -o \"${out}\" \$(root-config --libs) -lstdc++fs"
-  nix-shell -p root gcc --run "${compile_cmd}"
+  compile_cmd="root_cflags=\$(root-config --cflags | sed -E 's/(^| )-std=[^ ]+//g'); g++ -fdiagnostics-color=always -g \${root_cflags} -std=${cpp_std} \"${src}\" -o \"${out}\" \$(root-config --libs) -lstdc++fs"
+  nix-shell --pure -p root gcc --run "${compile_cmd}"
 }
 
 run_in_python_root_shell() {

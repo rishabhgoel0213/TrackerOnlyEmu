@@ -16,6 +16,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <system_error>
 
 namespace fs = std::experimental::filesystem;
@@ -51,6 +52,12 @@ struct EffHists
     TH1D denom;
     TH1D realNum;
     TH1D emuNum;
+};
+
+struct AxisRange
+{
+    double xMin = 0.0;
+    double xMax = 20.0;
 };
 
 struct RunningStats
@@ -141,6 +148,21 @@ std::vector<std::string> listTestOutputFiles(const std::string& genDir)
     return files;
 }
 
+AxisRange branchAxisRange(const std::string& binBranch)
+{
+    static const std::map<std::string, AxisRange> kBranchRanges = {
+        {"d0_pt", AxisRange{0.0, 20.0}},
+        {"q2", AxisRange{-5.0, 15.0}},
+        {"mmiss2", AxisRange{-5.0, 15.0}},
+        {"el", AxisRange{0.0, 4.0}},
+        {"nspdhits", AxisRange{0.0, 700.0}},
+    };
+
+    const auto it = kBranchRanges.find(binBranch);
+    if(it != kBranchRanges.end()) return it->second;
+    return AxisRange{};
+}
+
 void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
 {
     gROOT->SetBatch(kTRUE);
@@ -157,10 +179,11 @@ void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
 
     TCanvas c("c", "c", 900, 600);
     c.SetGrid();
+    c.SetRightMargin(0.30);
     realEff.Draw("HIST");
     emuEff.Draw("HIST SAME");
 
-    TLegend leg(0.55, 0.15, 0.88, 0.3);
+    TLegend leg(0.73, 0.75, 0.97, 0.90);
     leg.SetBorderSize(0);
     leg.AddEntry(&realEff, "Real response", "l");
     leg.AddEntry(&emuEff, "Emulated", "l");
@@ -189,8 +212,6 @@ int main(int argc, char** argv)
 
     //Histogram Parameters
     constexpr int numBins = 20;
-    constexpr double xMin = 0.0;
-    constexpr double xMax = 20.0;
 
     std::error_code ec;
     fs::create_directories(plotDir, ec);
@@ -201,6 +222,8 @@ int main(int argc, char** argv)
 
     for(const auto& binBranch : binBranches)
     {
+        const AxisRange axisRange = branchAxisRange(binBranch);
+
         std::vector<RunningStats> realStats(numBins);
         std::vector<RunningStats> emuStats(numBins);
         std::vector<RunningStats> denomStats(numBins);
@@ -209,7 +232,7 @@ int main(int argc, char** argv)
             std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "READ"));
             auto* tree = file->Get<TTree>("DecayTree");
 
-            auto h = fillHists(tree, binBranch, numBins, xMin, xMax);
+            auto h = fillHists(tree, binBranch, numBins, axisRange.xMin, axisRange.xMax);
             auto realEff = efficiencyHist(h.realNum, h.denom, "hRealEff");
             auto emuEff = efficiencyHist(h.emuNum, h.denom, "hEmuEff");
 
@@ -229,7 +252,7 @@ int main(int argc, char** argv)
         }
 
         const std::string axisTitle = "L0Hadron TOS efficiency;" + binBranch + ";Efficiency";
-        TH1D axis("axis", axisTitle.c_str(), numBins, xMin, xMax);
+        TH1D axis("axis", axisTitle.c_str(), numBins, axisRange.xMin, axisRange.xMax);
 
         std::vector<double> x;
         std::vector<double> ex;
@@ -275,6 +298,7 @@ int main(int argc, char** argv)
 
         TCanvas c("c", "c", 900, 600);
         c.SetGrid();
+        c.SetRightMargin(0.30);
         axis.SetMinimum(0.0);
         axis.SetMaximum(1.05);
         axis.Draw("AXIS");
@@ -292,7 +316,7 @@ int main(int argc, char** argv)
         grReal->Draw("E1P SAME");
         grEmu->Draw("E1P SAME");
 
-        TLegend leg(0.55, 0.15, 0.88, 0.33);
+        TLegend leg(0.73, 0.75, 0.97, 0.90);
         leg.SetBorderSize(0);
         leg.AddEntry(grReal, "Real response", "lep");
         leg.AddEntry(grEmu, "Emulated", "lep");

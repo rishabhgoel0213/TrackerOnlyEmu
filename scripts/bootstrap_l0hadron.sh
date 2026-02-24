@@ -48,6 +48,79 @@ cleanup_intermediate() {
   fi
 }
 
+require_glob() {
+  local pattern="$1"
+  local what="$2"
+  local dir="${pattern%/*}"
+  local name="${pattern##*/}"
+  if [[ "${dir}" == "${pattern}" ]]; then
+    dir="."
+  fi
+  if [[ ! -d "${dir}" ]] || ! find "${dir}" -maxdepth 1 -type f -name "${name}" -print -quit | grep -q .; then
+    echo "Required files missing for ${what}: ${pattern}" >&2
+    exit 1
+  fi
+}
+
+clear_plot_outputs() {
+  local final_plot_name="$1"
+  shift
+  local -a bin_branches=("$@")
+  rm -f -- "${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}" "${PLOTS_DIR}/${final_plot_name}"
+  for branch in "${bin_branches[@]}"; do
+    rm -f -- "${PLOTS_DIR}/${branch}_${final_plot_name}"
+  done
+}
+
+run_subset_step() {
+  local input_path="$1"
+  rm -f -- "${SUBSETS_DIR}"/train_subset_*.root "${SUBSETS_DIR}"/test_subset_*.root
+  rm -f -- "${GEN_DIR}"/train_subset_*_trained_output.root "${GEN_DIR}"/train_subset_*_xgb.pickle
+  rm -f -- "${GEN_DIR}"/test_subset_*_output.root
+
+  build_root_cpp "${CREATE_SUBSETS_SRC}" "${CREATE_SUBSETS_BIN}"
+  if [[ -n "${input_path}" ]]; then
+    "${CREATE_SUBSETS_BIN}" "${input_path}"
+  else
+    "${CREATE_SUBSETS_BIN}"
+  fi
+
+  require_glob "${SUBSETS_DIR}/train_subset_*.root" "subset step"
+  require_glob "${SUBSETS_DIR}/test_subset_*.root" "subset step"
+}
+
+run_train_step() {
+  require_glob "${SUBSETS_DIR}/train_subset_*.root" "train step"
+  rm -f -- "${GEN_DIR}"/train_subset_*_trained_output.root "${GEN_DIR}"/train_subset_*_xgb.pickle
+  run_in_python_root_shell "bash -e \"${TRAIN_SCRIPT}\""
+  require_glob "${GEN_DIR}/train_subset_*_xgb.pickle" "train step"
+}
+
+run_test_step() {
+  require_glob "${SUBSETS_DIR}/test_subset_*.root" "test step"
+  require_glob "${GEN_DIR}/train_subset_*_xgb.pickle" "test step"
+  rm -f -- "${GEN_DIR}"/test_subset_*_output.root
+  run_in_python_root_shell "bash -e \"${TEST_SCRIPT}\""
+  require_glob "${GEN_DIR}/test_subset_*_output.root" "test step"
+}
+
+run_plot_step() {
+  local final_plot_name="$1"
+  shift
+  local -a bin_branches=("$@")
+
+  require_glob "${GEN_DIR}/test_subset_*_output.root" "plot step"
+  clear_plot_outputs "${final_plot_name}" "${bin_branches[@]}"
+  build_root_cpp "${GENERATE_PLOTS_SRC}" "${GENERATE_PLOTS_BIN}"
+  "${GENERATE_PLOTS_BIN}" "${final_plot_name}" "${bin_branches[@]}"
+  for branch in "${bin_branches[@]}"; do
+    if [[ ! -f "${PLOTS_DIR}/${branch}_${final_plot_name}" ]]; then
+      echo "Final plot was not produced at ${PLOTS_DIR}/${branch}_${final_plot_name}" >&2
+      exit 1
+    fi
+  done
+}
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
@@ -56,14 +129,14 @@ Options:
   -i, --input PATH           Input ROOT file for subset creation.
   -p, --plot-name NAME       Base name for output plot files.
   -b, --branches LIST...     Space-separated branch list (can be repeated).
-  -s, --skip STEP...         Skip pipeline steps: subsets train test plots.
+  -s, --step STEP            Run only one pipeline step: subset train test plot.
   -h, --help                 Show this help message.
 
 Examples:
   $(basename "$0")
   $(basename "$0") -i /path/to/input.root -p efficiency_plot_2018.png
   $(basename "$0") -b d0_pt k_pt -b pi_pt
-  $(basename "$0") -s subsets train
+  $(basename "$0") -s train
 EOF
 }
 
@@ -71,10 +144,7 @@ main() {
   local input_path=""
   local final_plot_name="${DEFAULT_FINAL_PLOT_NAME}"
   local -a bin_branches=()
-  local skip_subsets=0
-  local skip_train=0
-  local skip_test=0
-  local skip_plots=0
+  local step=""
   while (($#)); do
     case "$1" in
       -i|--input)
@@ -107,27 +177,22 @@ main() {
           shift
         done
         ;;
-      -s|--skip)
+      -s|--step)
         if (($# < 2)); then
           echo "Missing value for $1" >&2
           usage >&2
           exit 1
         fi
-        shift
-        while (($#)) && [[ "$1" != -* ]]; do
-          case "$1" in
-            subsets) skip_subsets=1 ;;
-            train) skip_train=1 ;;
-            test) skip_test=1 ;;
-            plots) skip_plots=1 ;;
-            *)
-              echo "Unknown skip step: $1" >&2
-              usage >&2
-              exit 1
-              ;;
-          esac
-          shift
-        done
+        step="$2"
+        case "${step}" in
+          subset|train|test|plot) ;;
+          *)
+            echo "Unknown step: ${step}" >&2
+            usage >&2
+            exit 1
+            ;;
+        esac
+        shift 2
         ;;
       -h|--help)
         usage
@@ -159,71 +224,30 @@ main() {
     bin_branches=("d0_pt")
   fi
 
-  local run_subsets=1
-  local run_train=1
-  local run_test=1
-  local run_plots=1
-  ((skip_subsets)) && run_subsets=0
-  ((skip_train)) && run_train=0
-  ((skip_test)) && run_test=0
-  ((skip_plots)) && run_plots=0
-
   cd -- "${REPO_ROOT}"
   mkdir -p -- "${GEN_DIR}" "${SUBSETS_DIR}" "${PLOTS_DIR}"
 
   cleanup_intermediate
-
-  if ((run_subsets)); then
-    rm -f -- "${SUBSETS_DIR}"/train_subset_*.root "${SUBSETS_DIR}"/test_subset_*.root
-    rm -f -- "${GEN_DIR}"/train_subset_*_trained_output.root "${GEN_DIR}"/train_subset_*_xgb.pickle
-    rm -f -- "${GEN_DIR}"/test_subset_*_output.root
-    rm -f -- "${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}" "${PLOTS_DIR}/${final_plot_name}"
-    for branch in "${bin_branches[@]}"; do
-      rm -f -- "${PLOTS_DIR}/${branch}_${final_plot_name}"
-    done
-
-    build_root_cpp "${CREATE_SUBSETS_SRC}" "${CREATE_SUBSETS_BIN}"
-    if [[ -n "${input_path}" ]]; then
-      "${CREATE_SUBSETS_BIN}" "${input_path}"
-    else
-      "${CREATE_SUBSETS_BIN}"
-    fi
-  fi
-
-  if ((run_train)); then
-    rm -f -- "${GEN_DIR}"/train_subset_*_trained_output.root "${GEN_DIR}"/train_subset_*_xgb.pickle
-    run_in_python_root_shell "bash -e \"${TRAIN_SCRIPT}\""
-  fi
-
-  if ((run_test)); then
-    rm -f -- "${GEN_DIR}"/test_subset_*_output.root
-    run_in_python_root_shell "bash -e \"${TEST_SCRIPT}\""
-  fi
-
-  if ((run_plots)); then
-    rm -f -- "${PLOTS_DIR}/${DEFAULT_FINAL_PLOT_NAME}" "${PLOTS_DIR}/${final_plot_name}"
-    for branch in "${bin_branches[@]}"; do
-      rm -f -- "${PLOTS_DIR}/${branch}_${final_plot_name}"
-    done
-    build_root_cpp "${GENERATE_PLOTS_SRC}" "${GENERATE_PLOTS_BIN}"
-    "${GENERATE_PLOTS_BIN}" "${final_plot_name}" "${bin_branches[@]}"
-  fi
-
-  if ((run_test || run_plots)); then
-    if ! compgen -G "${GEN_DIR}/test_subset_*_output.root" > /dev/null; then
-      echo "No final test output ROOT files were produced in ${GEN_DIR}" >&2
-      exit 1
-    fi
-  fi
-
-  if ((run_plots)); then
-    for branch in "${bin_branches[@]}"; do
-      if [[ ! -f "${PLOTS_DIR}/${branch}_${final_plot_name}" ]]; then
-        echo "Final plot was not produced at ${PLOTS_DIR}/${branch}_${final_plot_name}" >&2
-        exit 1
-      fi
-    done
-  fi
+  case "${step}" in
+    subset)
+      run_subset_step "${input_path}"
+      ;;
+    train)
+      run_train_step
+      ;;
+    test)
+      run_test_step
+      ;;
+    plot)
+      run_plot_step "${final_plot_name}" "${bin_branches[@]}"
+      ;;
+    "")
+      run_subset_step "${input_path}"
+      run_train_step
+      run_test_step
+      run_plot_step "${final_plot_name}" "${bin_branches[@]}"
+      ;;
+  esac
 }
 
 main "$@"

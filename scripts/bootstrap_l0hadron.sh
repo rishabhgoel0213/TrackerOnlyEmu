@@ -129,14 +129,14 @@ Options:
   -i, --input PATH           Input ROOT file for subset creation.
   -p, --plot-name NAME       Base name for output plot files.
   -b, --branches LIST...     Space-separated branch list (can be repeated).
-  -s, --step STEP            Run only one pipeline step: subset train test plot.
+  -s, --step STEP...         Run selected steps (input order ignored): subset train test plot.
   -h, --help                 Show this help message.
 
 Examples:
   $(basename "$0")
   $(basename "$0") -i /path/to/input.root -p efficiency_plot_2018.png
   $(basename "$0") -b d0_pt k_pt -b pi_pt
-  $(basename "$0") -s train
+  $(basename "$0") -s plot train test
 EOF
 }
 
@@ -144,7 +144,7 @@ main() {
   local input_path=""
   local final_plot_name="${DEFAULT_FINAL_PLOT_NAME}"
   local -a bin_branches=()
-  local step=""
+  local -a steps=()
   while (($#)); do
     case "$1" in
       -i|--input)
@@ -183,16 +183,20 @@ main() {
           usage >&2
           exit 1
         fi
-        step="$2"
-        case "${step}" in
-          subset|train|test|plot) ;;
-          *)
-            echo "Unknown step: ${step}" >&2
-            usage >&2
-            exit 1
-            ;;
-        esac
-        shift 2
+        shift
+        while (($#)) && [[ "$1" != -* ]]; do
+          case "$1" in
+            subset|train|test|plot)
+              steps+=("$1")
+              ;;
+            *)
+              echo "Unknown step: $1" >&2
+              usage >&2
+              exit 1
+              ;;
+          esac
+          shift
+        done
         ;;
       -h|--help)
         usage
@@ -224,30 +228,39 @@ main() {
     bin_branches=("d0_pt")
   fi
 
+  if ((${#steps[@]} == 0)); then
+    steps=("subset" "train" "test" "plot")
+  fi
+
+  local run_subset=0
+  local run_train=0
+  local run_test=0
+  local run_plot=0
+  for step in "${steps[@]}"; do
+    case "${step}" in
+      subset) run_subset=1 ;;
+      train) run_train=1 ;;
+      test) run_test=1 ;;
+      plot) run_plot=1 ;;
+    esac
+  done
+
   cd -- "${REPO_ROOT}"
   mkdir -p -- "${GEN_DIR}" "${SUBSETS_DIR}" "${PLOTS_DIR}"
 
   cleanup_intermediate
-  case "${step}" in
-    subset)
-      run_subset_step "${input_path}"
-      ;;
-    train)
-      run_train_step
-      ;;
-    test)
-      run_test_step
-      ;;
-    plot)
-      run_plot_step "${final_plot_name}" "${bin_branches[@]}"
-      ;;
-    "")
-      run_subset_step "${input_path}"
-      run_train_step
-      run_test_step
-      run_plot_step "${final_plot_name}" "${bin_branches[@]}"
-      ;;
-  esac
+  if ((run_subset)); then
+    run_subset_step "${input_path}"
+  fi
+  if ((run_train)); then
+    run_train_step
+  fi
+  if ((run_test)); then
+    run_test_step
+  fi
+  if ((run_plot)); then
+    run_plot_step "${final_plot_name}" "${bin_branches[@]}"
+  fi
 }
 
 main "$@"

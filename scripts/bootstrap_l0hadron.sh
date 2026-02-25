@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Usage:
+#   scripts/bootstrap_l0hadron.sh [options]
+# Flags:
+#   -i, --input PATH        Input ROOT file/path used by the subset step.
+#   -p, --plot-name NAME    Base filename for output plot(s).
+#   -b, --branches ...      Branch names to use for plotting bins.
+#   -s, --step ...          Steps to run (subset/train/test/plot), order ignored.
+#   -h, --help              Print CLI help and exit.
 set -euo pipefail
 shopt -s nullglob
 

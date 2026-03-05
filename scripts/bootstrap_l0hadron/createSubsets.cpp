@@ -12,6 +12,7 @@
 #include <iostream>
 #include <numeric>
 #include <cstring>
+#include <cstdlib>
 
 namespace fs = std::experimental::filesystem;
 
@@ -104,20 +105,20 @@ int main(int argc, char** argv)
     std::mt19937 rng(12345);
     const fs::path scriptDir = fs::absolute(fs::path(argv[0])).parent_path();
     const fs::path repoRoot = scriptDir / ".." / "..";
-    const std::string subsetDir = (scriptDir / "subsets").string();
+    const std::string defaultSubsetDir = (scriptDir / "subsets").string();
     const std::string branchesPath = (repoRoot / "samples" / "run2-rdx-train_xgb.root").string();
+    const std::string defaultInputPath = (repoRoot / "samples" / "run2-rdx-sample.root").string();
+
+    //Inputs / Hyperparameters
+    const std::string inputPath = (argc > 2) ? argv[1] : defaultInputPath;
+    const int numSubsets = (argc > 2) ? std::atoi(argv[2]) : ((argc == 2) ? std::atoi(argv[1]) : 100);
+    const double trainFrac = (argc > 3) ? std::atof(argv[3]) : 0.5;
+    const std::string subsetDir = (argc > 4) ? argv[4] : defaultSubsetDir;
+    constexpr bool resample = true;
 
     std::error_code ec;
     fs::create_directories(subsetDir, ec);
     if(ec) return 1;
-
-    //Inputs
-    const std::string inputPath = (argc > 1) ? argv[1] : (repoRoot / "samples" / "run2-rdx-sample.root").string();
-
-    //Hyperparameters
-    constexpr int numSubsets = 100;
-    constexpr double trainFrac = 0.5;
-    constexpr bool resample = true;
 
     auto reduced = ::getReducedTree(inputPath, branchesPath);
     if(!reduced.tree) return 1;

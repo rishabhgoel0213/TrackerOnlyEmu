@@ -23,5 +23,6 @@ studies/**/*.pickle
 scripts/bootstrap_l0hadron/*
 !scripts/bootstrap_l0hadron/*.*
 !scripts/bootstrap_l0hadron/plots
+!scripts/bootstrap_l0hadron/configs
 scripts/bootstrap_l0hadron/test.cpp
 scripts/bootstrap_l0hadron/.virtualenv

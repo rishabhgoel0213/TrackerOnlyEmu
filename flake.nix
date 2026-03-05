@@ -43,6 +43,7 @@
 
             # Pinned Python dependencies
             numpy
+            pyyaml
             xgboost
             scikit-learn
           ];
@@ -61,6 +62,10 @@
               virtualenv $VENV
             fi
             source $VENV/bin/activate
+
+            # Keep toolchain resolution reproducible inside this dev shell.
+            export PATH="${pkgs.root}/bin:${pkgs.gcc}/bin:$PATH"
+            hash -r
 
             # allow for the environment to pick up packages installed with virtualenv
             export PYTHONPATH="$PWD:$VENV/${python.sitePackages}/:$PYTHONPATH"

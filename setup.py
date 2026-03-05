@@ -62,6 +62,7 @@ setup(
     include_package_data=True,
     install_requires=[
         'numpy',
+        'pyyaml',
         'scikit-learn~=1.0.0',
         'xgboost~=1.5.0'
     ],

@@ -58,6 +58,8 @@ struct AxisRange
 {
     double xMin = 0.0;
     double xMax = 20.0;
+    double yMin = 0.0;
+    double yMax = 1.05;
 };
 
 struct RunningStats
@@ -151,16 +153,49 @@ std::vector<std::string> listTestOutputFiles(const std::string& genDir)
 AxisRange branchAxisRange(const std::string& binBranch)
 {
     static const std::map<std::string, AxisRange> kBranchRanges = {
-        {"d0_pt", AxisRange{0.0, 20.0}},
-        {"q2", AxisRange{-5.0, 15.0}},
-        {"mmiss2", AxisRange{-5.0, 15.0}},
-        {"el", AxisRange{0.0, 4.0}},
-        {"nspdhits", AxisRange{0.0, 700.0}},
+        {"d0_pt", AxisRange{0.0, 20.0, 0.0, 1.05}},
+        {"q2", AxisRange{-5.0, 15.0, 0.0, 1.05}},
+        {"mmiss2", AxisRange{-5.0, 15.0, 0.0, 1.05}},
+        {"el", AxisRange{0.0, 4.0, 0.0, 1.05}},
+        {"nspdhits", AxisRange{0.0, 700.0, 0.0, 1.05}},
     };
 
     const auto it = kBranchRanges.find(binBranch);
     if(it != kBranchRanges.end()) return it->second;
     return AxisRange{};
+}
+
+std::vector<std::string> split(const std::string& value, char delim)
+{
+    std::vector<std::string> tokens;
+    size_t start = 0;
+    while(true)
+    {
+        const size_t pos = value.find(delim, start);
+        if(pos == std::string::npos)
+        {
+            tokens.push_back(value.substr(start));
+            break;
+        }
+        tokens.push_back(value.substr(start, pos - start));
+        start = pos + 1;
+    }
+    return tokens;
+}
+
+AxisRange axisRangeFromSpec(const std::string& spec, std::string& branchName)
+{
+    const auto tokens = split(spec, ':');
+    branchName = tokens[0];
+    AxisRange axisRange = branchAxisRange(branchName);
+    if(tokens.size() > 1)
+    {
+        axisRange.xMin = std::stod(tokens[1]);
+        axisRange.xMax = std::stod(tokens[2]);
+        axisRange.yMin = std::stod(tokens[3]);
+        axisRange.yMax = std::stod(tokens[4]);
+    }
+    return axisRange;
 }
 
 void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
@@ -197,17 +232,33 @@ int main(int argc, char** argv)
 {
     const fs::path scriptDir = fs::absolute(fs::path(argv[0])).parent_path();
     const fs::path repoRoot = scriptDir / ".." / "..";
-    const std::string genDir = (repoRoot / "gen").string();
-    const std::string plotDir = (scriptDir / "plots").string();
+    std::string genDir = (repoRoot / "gen").string();
+    std::string plotDir = (scriptDir / "plots").string();
     const std::string outputPlotName = (argc > 1) ? argv[1] : "efficiency_plot_combined.png";
     std::vector<std::string> binBranches;
-    if(argc > 2)
+    std::map<std::string, AxisRange> axisRanges;
+    for(int i = 2; i < argc; i++)
     {
-        for(int i = 2; i < argc; i++) binBranches.push_back(argv[i]);
+        const std::string arg = argv[i];
+        if(arg == "--gen-dir")
+        {
+            genDir = argv[++i];
+            continue;
+        }
+        if(arg == "--plot-dir")
+        {
+            plotDir = argv[++i];
+            continue;
+        }
+        std::string branchName;
+        const AxisRange axisRange = axisRangeFromSpec(arg, branchName);
+        binBranches.push_back(branchName);
+        axisRanges[branchName] = axisRange;
     }
-    else
+    if(binBranches.empty())
     {
         binBranches.push_back("d0_pt");
+        axisRanges["d0_pt"] = branchAxisRange("d0_pt");
     }
 
     //Histogram Parameters
@@ -222,7 +273,7 @@ int main(int argc, char** argv)
 
     for(const auto& binBranch : binBranches)
     {
-        const AxisRange axisRange = branchAxisRange(binBranch);
+        const AxisRange axisRange = axisRanges[binBranch];
 
         std::vector<RunningStats> realStats(numBins);
         std::vector<RunningStats> emuStats(numBins);
@@ -299,8 +350,8 @@ int main(int argc, char** argv)
         TCanvas c("c", "c", 900, 600);
         c.SetGrid();
         c.SetRightMargin(0.30);
-        axis.SetMinimum(0.0);
-        axis.SetMaximum(1.05);
+        axis.SetMinimum(axisRange.yMin);
+        axis.SetMaximum(axisRange.yMax);
         axis.Draw("AXIS");
 
         auto* grReal = new TGraphAsymmErrors(static_cast<int>(x.size()), x.data(), yReal.data(), ex.data(), ex.data(), eRealLow.data(), eRealHigh.data());

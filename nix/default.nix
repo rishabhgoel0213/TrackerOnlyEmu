@@ -1,6 +1,7 @@
 { stdenv
 , buildPythonPackage
 , numpy
+, pyyaml
 , scikit-learn
 , xgboost
 , root
@@ -16,6 +17,7 @@ buildPythonPackage rec {
 
   propagatedBuildInputs = [
     numpy
+    pyyaml
     scikit-learn
     root
     xgboost

@@ -16,7 +16,6 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-#include <map>
 #include <system_error>
 
 namespace fs = std::experimental::filesystem;
@@ -150,21 +149,6 @@ std::vector<std::string> listTestOutputFiles(const std::string& genDir)
     return files;
 }
 
-AxisRange branchAxisRange(const std::string& binBranch)
-{
-    static const std::map<std::string, AxisRange> kBranchRanges = {
-        {"d0_pt", AxisRange{0.0, 20.0, 0.0, 1.05}},
-        {"q2", AxisRange{-5.0, 15.0, 0.0, 1.05}},
-        {"mmiss2", AxisRange{-5.0, 15.0, 0.0, 1.05}},
-        {"el", AxisRange{0.0, 4.0, 0.0, 1.05}},
-        {"nspdhits", AxisRange{0.0, 700.0, 0.0, 1.05}},
-    };
-
-    const auto it = kBranchRanges.find(binBranch);
-    if(it != kBranchRanges.end()) return it->second;
-    return AxisRange{};
-}
-
 std::vector<std::string> split(const std::string& value, char delim)
 {
     std::vector<std::string> tokens;
@@ -187,15 +171,12 @@ AxisRange axisRangeFromSpec(const std::string& spec, std::string& branchName)
 {
     const auto tokens = split(spec, ':');
     branchName = tokens[0];
-    AxisRange axisRange = branchAxisRange(branchName);
-    if(tokens.size() > 1)
-    {
-        axisRange.xMin = std::stod(tokens[1]);
-        axisRange.xMax = std::stod(tokens[2]);
-        axisRange.yMin = std::stod(tokens[3]);
-        axisRange.yMax = std::stod(tokens[4]);
-    }
-    return axisRange;
+    return AxisRange{
+        std::stod(tokens[1]),
+        std::stod(tokens[2]),
+        std::stod(tokens[3]),
+        std::stod(tokens[4]),
+    };
 }
 
 void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
@@ -203,7 +184,7 @@ void savePerFilePlot(const std::string& outPath, TH1D& realEff, TH1D& emuEff)
     gROOT->SetBatch(kTRUE);
     gStyle->SetOptStat(0);
 
-    realEff.SetTitle("L0Hadron TOS efficiency;d0_{pT} [GeV];Efficiency");
+    realEff.SetTitle("L0Hadron TOS efficiency;Variable;Efficiency");
     realEff.SetMinimum(0.0);
     realEff.SetMaximum(1.05);
     realEff.SetLineColor(kBlack);
@@ -235,8 +216,7 @@ int main(int argc, char** argv)
     std::string genDir = (repoRoot / "gen").string();
     std::string plotDir = (scriptDir / "plots").string();
     const std::string outputPlotName = (argc > 1) ? argv[1] : "efficiency_plot_combined.png";
-    std::vector<std::string> binBranches;
-    std::map<std::string, AxisRange> axisRanges;
+    std::vector<std::pair<std::string, AxisRange>> branchesWithRanges;
     for(int i = 2; i < argc; i++)
     {
         const std::string arg = argv[i];
@@ -252,13 +232,7 @@ int main(int argc, char** argv)
         }
         std::string branchName;
         const AxisRange axisRange = axisRangeFromSpec(arg, branchName);
-        binBranches.push_back(branchName);
-        axisRanges[branchName] = axisRange;
-    }
-    if(binBranches.empty())
-    {
-        binBranches.push_back("d0_pt");
-        axisRanges["d0_pt"] = branchAxisRange("d0_pt");
+        branchesWithRanges.emplace_back(branchName, axisRange);
     }
 
     //Histogram Parameters
@@ -271,9 +245,10 @@ int main(int argc, char** argv)
     const auto files = listTestOutputFiles(genDir);
     if(files.empty()) return 1;
 
-    for(const auto& binBranch : binBranches)
+    for(const auto& branchSpec : branchesWithRanges)
     {
-        const AxisRange axisRange = axisRanges[binBranch];
+        const std::string& binBranch = branchSpec.first;
+        const AxisRange axisRange = branchSpec.second;
 
         std::vector<RunningStats> realStats(numBins);
         std::vector<RunningStats> emuStats(numBins);

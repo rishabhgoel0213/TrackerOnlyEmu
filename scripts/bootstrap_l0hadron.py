@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 import yaml
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 BOOTSTRAP_DIR = SCRIPT_DIR / "bootstrap_l0hadron"
@@ -46,28 +45,6 @@ def get_tagged_run_dir(tag: str) -> Path:
     while (GEN_DIR / f"{tag}-{suffix}").exists():
         suffix += 1
     return GEN_DIR / f"{tag}-{suffix}"
-
-
-def get_latest_run_dir(tag: str) -> Path:
-    candidates: list[tuple[int, Path]] = []
-    if not GEN_DIR.exists():
-        return GEN_DIR / tag
-    for path in GEN_DIR.iterdir():
-        if not path.is_dir():
-            continue
-        name = path.name
-        if name == tag:
-            candidates.append((1, path))
-            continue
-        prefix = f"{tag}-"
-        if name.startswith(prefix):
-            suffix = name[len(prefix) :]
-            if suffix.isdigit():
-                candidates.append((int(suffix), path))
-    if not candidates:
-        return GEN_DIR / tag
-    candidates.sort(key=lambda item: item[0])
-    return candidates[-1][1]
 
 
 def build_root_cpp(src: Path, out: Path) -> None:
@@ -149,13 +126,10 @@ def run_plot_step(
     build_root_cpp(GENERATE_PLOTS_SRC, GENERATE_PLOTS_BIN)
     branch_specs = []
     for branch in branches:
-        if branch in plot_ranges:
-            ranges = plot_ranges[branch]
-            branch_specs.append(
-                f"{branch}:{ranges['x_min']}:{ranges['x_max']}:{ranges['y_min']}:{ranges['y_max']}"
-            )
-        else:
-            branch_specs.append(branch)
+        ranges = plot_ranges[branch]
+        branch_specs.append(
+            f"{branch}:{ranges['x_min']}:{ranges['x_max']}:{ranges['y_min']}:{ranges['y_max']}"
+        )
     run(
         [
             str(GENERATE_PLOTS_BIN),
@@ -210,7 +184,7 @@ def main() -> None:
         run_dir = get_tagged_run_dir(tag)
     else:
         steps_to_run = [requested_step]
-        run_dir = get_latest_run_dir(tag)
+        run_dir = GEN_DIR / tag
     run_dir.mkdir(parents=True, exist_ok=True)
     subset_dir = run_dir / "subsets"
     plot_dir = run_dir / "plots"

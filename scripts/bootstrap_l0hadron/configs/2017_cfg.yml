@@ -7,11 +7,6 @@ branches:
   - mmiss2
   - el
   - nspdhits
-steps:
-  - subset
-  - train
-  - test
-  - plot
 num_subsets: 100
 train_frac: 0.5
 plot_ranges:

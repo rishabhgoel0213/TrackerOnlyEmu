@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import argparse
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
 import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -28,16 +27,15 @@ CPP_STD = "c++17"
 PIPELINE_STEPS = ["subset", "train", "test", "plot"]
 
 
-def run(cmd: list[str] | str, cwd: Path = REPO_ROOT) -> None:
-    if isinstance(cmd, str):
+def run(cmd, cwd=REPO_ROOT, shell=False):
+    if shell:
         print(f"+ {cmd}")
-        subprocess.run(cmd, cwd=str(cwd), shell=True, check=True)
-        return
-    print("+ " + " ".join(shlex.quote(token) for token in cmd))
-    subprocess.run(cmd, cwd=str(cwd), check=True)
+    else:
+        print("+ " + " ".join(shlex.quote(token) for token in cmd))
+    subprocess.run(cmd, cwd=cwd, shell=shell, check=True)
 
 
-def get_tagged_run_dir(tag: str) -> Path:
+def get_tagged_run_dir(tag):
     run_dir = GEN_DIR / tag
     if not run_dir.exists():
         return run_dir
@@ -47,111 +45,60 @@ def get_tagged_run_dir(tag: str) -> Path:
     return GEN_DIR / f"{tag}-{suffix}"
 
 
-def build_root_cpp(src: Path, out: Path) -> None:
+def build_root_cpp(src, out):
     src_q = shlex.quote(str(src))
     out_q = shlex.quote(str(out))
     cmd = (
         f"g++ -fdiagnostics-color=always -g $(root-config --cflags) "
         f"-std={CPP_STD} {src_q} -o {out_q} "
-        "$(root-config --libs) -lstdc++fs"
+        "$(root-config --libs) -lstdc++fs -O2"
     )
-    run(cmd)
+    run(cmd, shell=True)
 
 
-def run_subset_step(
-    input_path: str | None, num_subsets: int, train_frac: float, subset_dir: Path
-) -> None:
+def run_subset_step(input_path, num_subsets, train_frac, subset_dir):
     subset_dir.mkdir(parents=True, exist_ok=True)
     build_root_cpp(CREATE_SUBSETS_SRC, CREATE_SUBSETS_BIN)
-    resolved_input = input_path or str(REPO_ROOT / "samples" / "run2-rdx-sample.root")
-    cmd = [
-        str(CREATE_SUBSETS_BIN),
-        resolved_input,
-        str(num_subsets),
-        str(train_frac),
-        str(subset_dir),
-    ]
+    resolved_input = input_path or REPO_ROOT / "samples" / "run2-rdx-sample.root"
+    cmd = [CREATE_SUBSETS_BIN, resolved_input, str(num_subsets), str(train_frac), subset_dir]
     run(cmd)
 
 
-def run_train_step(run_dir: Path, subset_dir: Path) -> None:
+def run_train_step(run_dir, subset_dir):
     for input_file in sorted(subset_dir.glob("train_subset_*.root")):
         base = input_file.stem
         output_file = run_dir / f"{base}_trained_output.root"
         pickle_file = run_dir / f"{base}_xgb.pickle"
-        run(
-            [
-                sys.executable,
-                str(RUN_SCRIPT),
-                str(input_file),
-                str(output_file),
-                "--tree",
-                "DecayTree",
-                "--dump",
-                str(pickle_file),
-            ]
-        )
+        run([sys.executable, RUN_SCRIPT, input_file, output_file, "--tree", "DecayTree", "--dump", pickle_file, "--train-only"])
 
 
-def run_test_step(run_dir: Path, subset_dir: Path) -> None:
+def run_test_step(run_dir, subset_dir):
     for input_file in sorted(subset_dir.glob("test_subset_*.root")):
         base = input_file.stem
-        suffix = base[len("test_subset_"):] if base.startswith("test_subset_") else base
+        suffix = base[len("test_subset_"):]
         train_base = f"train_subset_{suffix}"
         output_file = run_dir / f"{base}_output.root"
         model_file = run_dir / f"{train_base}_xgb.pickle"
-        run(
-            [
-                sys.executable,
-                str(RUN_SCRIPT),
-                str(input_file),
-                str(output_file),
-                "--tree",
-                "DecayTree",
-                "--load",
-                str(model_file),
-                "--debug",
-            ]
-        )
+        run([sys.executable, RUN_SCRIPT, input_file, output_file, "--tree", "DecayTree", "--load", model_file, "--debug"])
 
 
-def run_plot_step(
-    run_dir: Path,
-    plot_dir: Path,
-    plot_name: str,
-    branches: list[str],
-    plot_ranges: dict[str, dict[str, float]],
-) -> None:
+def run_plot_step(run_dir, plot_dir, plot_name, branches, plot_ranges):
     plot_dir.mkdir(parents=True, exist_ok=True)
     build_root_cpp(GENERATE_PLOTS_SRC, GENERATE_PLOTS_BIN)
     branch_specs = []
     for branch in branches:
         ranges = plot_ranges[branch]
-        branch_specs.append(
-            f"{branch}:{ranges['x_min']}:{ranges['x_max']}:{ranges['y_min']}:{ranges['y_max']}"
-        )
-    run(
-        [
-            str(GENERATE_PLOTS_BIN),
-            plot_name,
-            "--gen-dir",
-            str(run_dir),
-            "--plot-dir",
-            str(plot_dir),
-            *branch_specs,
-        ]
-    )
+        branch_specs.append(f"{branch}:{ranges['x_min']}:{ranges['x_max']}:{ranges['y_min']}:{ranges['y_max']}")
+    run([GENERATE_PLOTS_BIN, plot_name, "--gen-dir", run_dir, "--plot-dir", plot_dir, *branch_specs])
 
 
-def load_config(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as config_file:
+def load_config(path):
+    with open(path) as config_file:
         return yaml.safe_load(config_file)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Bootstrap pipeline for L0Hadron."
-    )
+def parse_args():
+    parser = argparse.ArgumentParser(description="Bootstrap pipeline for L0Hadron.")
     parser.add_argument("config", help="Path to YAML config.")
     parser.add_argument(
         "-s",
@@ -162,9 +109,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main():
     args = parse_args()
-    config = load_config(Path(args.config))
+    config = load_config(args.config)
 
     input_path = config.get("input")
     plot_name = config.get("plot_name", config.get("plot-name", DEFAULT_PLOT_NAME))
@@ -176,14 +123,10 @@ def main() -> None:
     requested_step = args.step
 
     GEN_DIR.mkdir(parents=True, exist_ok=True)
-    if requested_step is None:
-        steps_to_run = PIPELINE_STEPS
-        run_dir = get_tagged_run_dir(tag)
-    elif requested_step == "subset":
-        steps_to_run = [requested_step]
+    steps_to_run = PIPELINE_STEPS if requested_step is None else [requested_step]
+    if requested_step in [None, "subset"]:
         run_dir = get_tagged_run_dir(tag)
     else:
-        steps_to_run = [requested_step]
         run_dir = GEN_DIR / tag
     run_dir.mkdir(parents=True, exist_ok=True)
     subset_dir = run_dir / "subsets"

@@ -18,19 +18,6 @@ namespace fs = std::experimental::filesystem;
 
 namespace
 {
-
-//Supressing some useless errors 
-void filteredRootErrorHandler(int level, Bool_t abort, const char* location, const char* msg)
-{
-    if(location && msg &&
-       (std::strcmp(location, "TList::Clear") == 0 || std::strcmp(location, "TList::Delete") == 0) &&
-       std::strstr(msg, "already deleted") != nullptr)
-    {
-        return;
-    }
-    DefaultErrorHandler(level, abort, location, msg);
-}
-
 struct ReducedTreeHandle 
 {
     std::unique_ptr<TChain> chain;
@@ -100,8 +87,6 @@ ReducedTreeHandle getReducedTree(const std::string& inputPath, const std::string
 
 int main(int argc, char** argv)
 {
-    SetErrorHandler(filteredRootErrorHandler);
-
     std::mt19937 rng(12345);
     const fs::path scriptDir = fs::absolute(fs::path(argv[0])).parent_path();
     const fs::path repoRoot = scriptDir / ".." / "..";
@@ -143,7 +128,7 @@ int main(int argc, char** argv)
     std::iota(shuffledIndexes.begin(), shuffledIndexes.end(), 0);
 
     std::shuffle(shuffledIndexes.begin(), shuffledIndexes.end(), rng);
-    std::uniform_int_distribution<long> dist(1, subsetSize - 1);
+    std::uniform_int_distribution<long> dist(0, numEntries - 1);
     for(int k = 0; k < numSubsets; k++)
     {
         if(resample)
@@ -188,10 +173,15 @@ int main(int argc, char** argv)
 
     for(int i = 0; i < numSubsets; i++)
     {
+        std::vector<bool> isTrain(indexes[i].size(), false);
+        const long numTrain = static_cast<long>(indexes[i].size() * trainFrac);
+        for(long j = 0; j < numTrain; j++) isTrain[j] = true;
+        std::shuffle(isTrain.begin(), isTrain.end(), rng);
+
         for(long j = 0; j < indexes[i].size(); j++)
         {
             reducedTree->GetEntry(indexes[i][j]);
-            if(j < indexes[i].size() * trainFrac) trainSubsets[i]->Fill();
+            if(isTrain[j]) trainSubsets[i]->Fill();
             else testSubsets[i]->Fill();
         }
         std::cout << "Tree #" << (i + 1) << " finished" << std::endl;

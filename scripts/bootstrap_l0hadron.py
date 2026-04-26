@@ -1,146 +1,68 @@
 #!/usr/bin/env python3
 
 import argparse
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
-import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
 BOOTSTRAP_DIR = SCRIPT_DIR / "bootstrap_l0hadron"
-GEN_DIR = REPO_ROOT / "gen"
+sys.path.insert(0, str(BOOTSTRAP_DIR))
 
-CREATE_SUBSETS_SRC = BOOTSTRAP_DIR / "createSubsets.cpp"
-CREATE_SUBSETS_BIN = BOOTSTRAP_DIR / "createSubsets"
-GENERATE_PLOTS_SRC = BOOTSTRAP_DIR / "generatePlots.cpp"
-GENERATE_PLOTS_BIN = BOOTSTRAP_DIR / "generatePlots"
-
-RUN_SCRIPT = SCRIPT_DIR / "run2-rdx-l0_hadron_tos.py"
-DEFAULT_PLOT_NAME = "efficiency_plot_combined.png"
-DEFAULT_NUM_SUBSETS = 100
-DEFAULT_TRAIN_FRAC = 0.5
-DEFAULT_TAG = "run"
-CPP_STD = "c++17"
-PIPELINE_STEPS = ["subset", "train", "test", "plot"]
-
-
-def run(cmd, cwd=REPO_ROOT, shell=False):
-    if shell:
-        print(f"+ {cmd}")
-    else:
-        print("+ " + " ".join(shlex.quote(token) for token in cmd))
-    subprocess.run(cmd, cwd=cwd, shell=shell, check=True)
-
-
-def get_tagged_run_dir(tag):
-    run_dir = GEN_DIR / tag
-    if not run_dir.exists():
-        return run_dir
-    suffix = 2
-    while (GEN_DIR / f"{tag}-{suffix}").exists():
-        suffix += 1
-    return GEN_DIR / f"{tag}-{suffix}"
-
-
-def build_root_cpp(src, out):
-    src_q = shlex.quote(str(src))
-    out_q = shlex.quote(str(out))
-    cmd = (
-        f"g++ -fdiagnostics-color=always -g $(root-config --cflags) "
-        f"-std={CPP_STD} {src_q} -o {out_q} "
-        "$(root-config --libs) -lstdc++fs -O2"
-    )
-    run(cmd, shell=True)
-
-
-def run_subset_step(input_path, num_subsets, train_frac, subset_dir):
-    subset_dir.mkdir(parents=True, exist_ok=True)
-    build_root_cpp(CREATE_SUBSETS_SRC, CREATE_SUBSETS_BIN)
-    resolved_input = input_path or REPO_ROOT / "samples" / "run2-rdx-sample.root"
-    cmd = [CREATE_SUBSETS_BIN, resolved_input, str(num_subsets), str(train_frac), subset_dir]
-    run(cmd)
-
-
-def run_train_step(run_dir, subset_dir):
-    for input_file in sorted(subset_dir.glob("train_subset_*.root")):
-        base = input_file.stem
-        output_file = run_dir / f"{base}_trained_output.root"
-        pickle_file = run_dir / f"{base}_xgb.pickle"
-        run([sys.executable, RUN_SCRIPT, input_file, output_file, "--tree", "DecayTree", "--dump", pickle_file, "--train-only"])
-
-
-def run_test_step(run_dir, subset_dir):
-    for input_file in sorted(subset_dir.glob("test_subset_*.root")):
-        base = input_file.stem
-        suffix = base[len("test_subset_"):]
-        train_base = f"train_subset_{suffix}"
-        output_file = run_dir / f"{base}_output.root"
-        model_file = run_dir / f"{train_base}_xgb.pickle"
-        run([sys.executable, RUN_SCRIPT, input_file, output_file, "--tree", "DecayTree", "--load", model_file, "--debug"])
-
-
-def run_plot_step(run_dir, plot_dir, plot_name, branches, plot_ranges):
-    plot_dir.mkdir(parents=True, exist_ok=True)
-    build_root_cpp(GENERATE_PLOTS_SRC, GENERATE_PLOTS_BIN)
-    branch_specs = []
-    for branch in branches:
-        ranges = plot_ranges[branch]
-        branch_specs.append(f"{branch}:{ranges['x_min']}:{ranges['x_max']}:{ranges['y_min']}:{ranges['y_max']}")
-    run([GENERATE_PLOTS_BIN, plot_name, "--gen-dir", run_dir, "--plot-dir", plot_dir, *branch_specs])
-
-
-def load_config(path):
-    with open(path) as config_file:
-        return yaml.safe_load(config_file)
+STEPS = (
+    "all",
+    "prepare",
+    "central",
+    "xgb-weights",
+    "train-test",
+    "real-validation",
+    "plot",
+)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Bootstrap pipeline for L0Hadron.")
-    parser.add_argument("config", help="Path to YAML config.")
+    parser = argparse.ArgumentParser(
+        description="Bootstrap uncertainty pipeline for Run 2 RDX L0Hadron XGB emulation."
+    )
+    parser.add_argument("config", help="YAML config describing the input sample and plot ranges.")
     parser.add_argument(
         "-s",
         "--step",
-        choices=PIPELINE_STEPS,
-        help="Run exactly one step. If omitted, runs the full pipeline.",
+        choices=STEPS,
+        default="all",
+        help="Run one step, or the full pipeline. Defaults to all.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Recreate outputs even when resumable files already exist.",
+    )
+    parser.add_argument(
+        "--plot-kind",
+        action="append",
+        choices=("xgb-weights", "train-test", "real-validation", "ratio", "2d"),
+        help="Limit --step plot to one plot family. Repeat for multiple families.",
+    )
+    parser.add_argument(
+        "--plot-branch",
+        action="append",
+        help="Limit --step plot to one branch. Repeat for multiple branches.",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    from l0bootstrap.config import load_config
+    from l0bootstrap.pipeline import Pipeline
+
     config = load_config(args.config)
-
-    input_path = config.get("input")
-    plot_name = config.get("plot_name", config.get("plot-name", DEFAULT_PLOT_NAME))
-    branches = config.get("branches", ["d0_pt"])
-    num_subsets = config.get("num_subsets", config.get("num-subsets", DEFAULT_NUM_SUBSETS))
-    train_frac = config.get("train_frac", config.get("train-frac", DEFAULT_TRAIN_FRAC))
-    plot_ranges = config.get("plot_ranges", config.get("plot-ranges", {}))
-    tag = config.get("tag", DEFAULT_TAG)
-    requested_step = args.step
-
-    GEN_DIR.mkdir(parents=True, exist_ok=True)
-    steps_to_run = PIPELINE_STEPS if requested_step is None else [requested_step]
-    if requested_step in [None, "subset"]:
-        run_dir = get_tagged_run_dir(tag)
-    else:
-        run_dir = GEN_DIR / tag
-    run_dir.mkdir(parents=True, exist_ok=True)
-    subset_dir = run_dir / "subsets"
-    plot_dir = run_dir / "plots"
-    print(f"Run directory: {run_dir}")
-
-    if "subset" in steps_to_run:
-        run_subset_step(input_path, num_subsets, train_frac, subset_dir)
-    if "train" in steps_to_run:
-        run_train_step(run_dir, subset_dir)
-    if "test" in steps_to_run:
-        run_test_step(run_dir, subset_dir)
-    if "plot" in steps_to_run:
-        run_plot_step(run_dir, plot_dir, plot_name, branches, plot_ranges)
+    Pipeline(
+        config,
+        force=args.force,
+        plot_kinds=args.plot_kind,
+        plot_branches=args.plot_branch,
+    ).run(args.step)
 
 
 if __name__ == "__main__":

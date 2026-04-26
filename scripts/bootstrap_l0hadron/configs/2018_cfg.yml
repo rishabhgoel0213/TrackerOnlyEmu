@@ -1,14 +1,16 @@
 input: /home/rishabh/lhcb-ntuples-gen/ntuples/0.9.13-JpsiK_and_Dstlnu_fullsim_for_L0emu_initrwgt/Dstlnu-mc/2018/norm_DstMu/DstMu-11574021-MagDown
 tag: l0hadron-2018
-plot_name: efficiency_plot_2018.png
+year: "2018"
 branches:
   - d0_pt
   - q2
   - mmiss2
   - el
   - nspdhits
-num_subsets: 100
-train_frac: 0.5
+n_bootstraps: 100
+train_fraction: 0.5
+num_bins: 20
+two_dimensional_bins: 12
 plot_ranges:
   d0_pt:
     x_min: 0.0

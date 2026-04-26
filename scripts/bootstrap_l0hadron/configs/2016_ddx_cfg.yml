@@ -1,14 +1,16 @@
 input: /home/rishabh/lhcb-ntuples-gen/ntuples/0.9.5-bugfix/Dst_D0-mc/Dst_D0--21_10_26--mc--MC_2016_Beam6500GeV-2016-MagUp-Nu1.6-25ns-Pythia8_Sim09j_Trig0x6139160F_Reco16_Turbo03a_Filtered_12895400_D0TAUNU.SAFESTRIPTRIG.DST.root
 tag: l0hadron-2016-ddx
-plot_name: efficiency_plot_2016_ddx.png
+year: "2016"
 branches:
   - d0_pt
   - q2
   - mmiss2
   - el
   - nspdhits
-num_subsets: 100
-train_frac: 0.5
+n_bootstraps: 100
+train_fraction: 0.5
+num_bins: 20
+two_dimensional_bins: 12
 plot_ranges:
   d0_pt:
     x_min: 0.0
